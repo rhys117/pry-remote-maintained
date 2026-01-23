@@ -10,8 +10,8 @@ Gem::Specification.new do |s|
   s.homepage    = "http://github.com/Mon-Ouie/pry-remote"
   s.license     = "BSD-2-Clause"
 
-  s.email   = "mon.ouie@gmail.com"
-  s.authors = ["Mon ouie"]
+  s.email   = "rhys117gmail.com"
+  s.authors = ["Rhys Muray"]
 
   s.required_ruby_version = ">= 3.0"
 
@@ -19,7 +19,7 @@ Gem::Specification.new do |s|
 
   s.require_paths = ["lib"]
 
-  s.add_dependency "pry",  "~> 0.14"
+  s.add_dependency "pry",  "~> 0.16"
   s.add_dependency "slop", "~> 4.0"
   s.add_dependency "drb",  ">= 2.0"
 
