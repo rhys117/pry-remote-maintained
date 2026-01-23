@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 require 'pry'
 require 'slop'
-require 'drb'
+require 'drb/drb'
 require 'readline'
 require 'open3'
 
@@ -232,9 +234,9 @@ module PryRemote
       puts "[pry-remote] Client received, starting remote session"
       setup
 
-      Pry.start(@object, @options.merge(:input => client.input_proxy,
-                                        :output => client.output,
-                                        :hooks => @hooks))
+      Pry.start(@object, @options.merge(input: client.input_proxy,
+                                        output: client.output,
+                                        hooks: @hooks))
     ensure
       teardown
     end
@@ -260,32 +262,39 @@ module PryRemote
   # Parses arguments and allows to start the client.
   class CLI
     def initialize(args = ARGV)
-      params = Slop.parse args, :help => true do
-        banner "#$PROGRAM_NAME [OPTIONS]"
+      opts = Slop.parse(args) do |o|
+        o.banner = "Usage: #{$PROGRAM_NAME} [OPTIONS]"
 
-        on :s, :server=, "Host of the server (#{DefaultHost})", :argument => :optional,
-           :default => DefaultHost
-        on :p, :port=, "Port of the server (#{DefaultPort})", :argument => :optional,
-           :as => Integer, :default => DefaultPort
-        on :w, :wait, "Wait for the pry server to come up",
-           :default => false
-        on :r, :persist, "Persist the client to wait for the pry server to come up each time",
-           :default => false
-        on :c, :capture, "Captures $stdout and $stderr from the server (true)",
-           :default => true
-        on :f, "Disables loading of .pryrc and its plugins, requires, and command history "
+        o.string '-s', '--server', "Host of the server (#{DefaultHost})",
+                 default: DefaultHost
+        o.integer '-p', '--port', "Port of the server (#{DefaultPort})",
+                  default: DefaultPort
+        o.bool '-w', '--wait', "Wait for the pry server to come up",
+               default: false
+        o.bool '-r', '--persist', "Persist the client to wait for the pry server to come up each time",
+               default: false
+        o.bool '-c', '--capture', "Captures $stdout and $stderr from the server",
+               default: true
+        o.bool '-f', '--skip-rc', "Disables loading of .pryrc and its plugins, requires, and command history",
+               default: false
+        o.on '-h', '--help', "Show this help message" do
+          puts o
+          exit
+        end
       end
 
-      exit if params.help?
+      @host = opts[:server]
+      @port = opts[:port]
 
-      @host = params[:server]
-      @port = params[:port]
+      @wait = opts[:wait]
+      @persist = opts[:persist]
+      @capture = opts[:capture]
 
-      @wait = params[:wait]
-      @persist = params[:persist]
-      @capture = params[:capture]
-
-      Pry.initial_session_setup unless params[:f]
+      if opts[:skip_rc]
+        Pry.config.should_load_rc = false
+        Pry.config.should_load_plugins = false
+        Pry.config.history_load = false
+      end
     end
 
     # @return [String] Host of the server
