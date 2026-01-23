@@ -3,7 +3,7 @@
 require 'pry'
 require 'slop'
 require 'drb/drb'
-require 'readline'
+require 'reline'
 require 'open3'
 
 module PryRemote
@@ -56,7 +56,7 @@ module PryRemote
     end
 
     def readline(prompt)
-      if Readline == @obj
+      if Reline == @obj
         @obj.readline(prompt, true)
       elsif @obj.method(:readline).arity == 1
         @obj.readline(prompt)
