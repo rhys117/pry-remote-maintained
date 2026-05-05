@@ -367,7 +367,7 @@ module PryRemote
         # The method we are calling here doesn't matter.
         # This is a hack to close the connection of DRb.
         client.cleanup
-      rescue DRb::DRbConnError, NoMethodError
+      rescue DRb::DRbConnError, DRb::DRbRemoteError, NoMethodError
       end
     end
   end
