@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'pry'
-require 'slop'
+require 'optparse'
 require 'drb/drb'
 require 'reline'
 require 'open3'
@@ -262,35 +262,39 @@ module PryRemote
   # Parses arguments and allows to start the client.
   class CLI
     def initialize(args = ARGV)
-      opts = Slop.parse(args) do |o|
+      options = {
+        server: DefaultHost,
+        port: DefaultPort,
+        wait: false,
+        persist: false,
+        capture: true,
+        skip_rc: false
+      }
+
+      parser = OptionParser.new do |o|
         o.banner = "Usage: #{$PROGRAM_NAME} [OPTIONS]"
 
-        o.string '-s', '--server', "Host of the server (#{DefaultHost})",
-                 default: DefaultHost
-        o.integer '-p', '--port', "Port of the server (#{DefaultPort})",
-                  default: DefaultPort
-        o.bool '-w', '--wait', "Wait for the pry server to come up",
-               default: false
-        o.bool '-r', '--persist', "Persist the client to wait for the pry server to come up each time",
-               default: false
-        o.bool '-c', '--capture', "Captures $stdout and $stderr from the server",
-               default: true
-        o.bool '-f', '--skip-rc', "Disables loading of .pryrc and its plugins, requires, and command history",
-               default: false
-        o.on '-h', '--help', "Show this help message" do
+        o.on('-s', '--server HOST', "Host of the server (#{DefaultHost})") { |v| options[:server] = v }
+        o.on('-p', '--port PORT', Integer, "Port of the server (#{DefaultPort})") { |v| options[:port] = v }
+        o.on('-w', '--wait', "Wait for the pry server to come up") { options[:wait] = true }
+        o.on('-r', '--persist', "Persist the client to wait for the pry server to come up each time") { options[:persist] = true }
+        o.on('-c', '--[no-]capture', "Captures $stdout and $stderr from the server") { |v| options[:capture] = v }
+        o.on('-f', '--skip-rc', "Disables loading of .pryrc and its plugins, requires, and command history") { options[:skip_rc] = true }
+        o.on('-h', '--help', "Show this help message") do
           puts o
           exit
         end
       end
+      parser.parse!(args)
 
-      @host = opts[:server]
-      @port = opts[:port]
+      @host = options[:server]
+      @port = options[:port]
 
-      @wait = opts[:wait]
-      @persist = opts[:persist]
-      @capture = opts[:capture]
+      @wait = options[:wait]
+      @persist = options[:persist]
+      @capture = options[:capture]
 
-      if opts[:skip_rc]
+      if options[:skip_rc]
         Pry.config.should_load_rc = false
         Pry.config.should_load_plugins = false
         Pry.config.history_load = false

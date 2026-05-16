@@ -7,7 +7,7 @@ Gem::Specification.new do |s|
 
   s.summary     = "Connect to Pry remotely"
   s.description = "Connect to Pry remotely using DRb"
-  s.homepage    = "http://github.com/Mon-Ouie/pry-remote"
+  s.homepage    = "http://github.com/rhys117/pry-remote-mantained"
   s.license     = "BSD-2-Clause"
 
   s.email   = "rhys117gmail.com"
@@ -19,9 +19,8 @@ Gem::Specification.new do |s|
 
   s.require_paths = ["lib"]
 
-  s.add_dependency "pry",  "~> 0.16"
-  s.add_dependency "slop", "~> 4.0"
-  s.add_dependency "drb",  ">= 2.0"
+  s.add_dependency "pry", "~> 0.16"
+  s.add_dependency "drb", ">= 2.0"
 
   s.executables = ["pry-remote"]
 end
