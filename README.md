@@ -56,3 +56,20 @@ You can then connect yourself using ``pry-remote``:
     ]
     pry(#<Foo:0x00000001efb3b0>):3> ^D
 
+# Console features
+
+When connected from a terminal, the client behaves like a modern Rails
+console: input and results are syntax highlighted, completions for the
+remote binding (its locals, instance variables, methods, and Pry commands)
+appear in a dropdown as you type, and your Pry history from previous
+sessions is available with up-arrow.
+
+Highlighting and autocompletion are enabled by default when stdout is a
+TTY and can be toggled individually:
+
+    pry-remote --no-color          # plain output
+    pry-remote --no-autocomplete   # tab-completion only, no dropdown
+
+Every keystroke with autocompletion enabled queries the server for
+candidates, so consider `--no-autocomplete` on high-latency connections.
+

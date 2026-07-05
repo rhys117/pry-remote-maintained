@@ -5,6 +5,7 @@ require 'optparse'
 require 'drb/drb'
 require 'reline'
 require 'open3'
+require 'pp'
 
 module PryRemote
   DefaultHost = ENV['PRY_REMOTE_DEFAULT_HOST'] || "127.0.0.1"
@@ -43,6 +44,7 @@ module PryRemote
 
     def initialize(obj)
       @obj = obj
+      @tty = obj.respond_to?(:tty?) && obj.tty?
     end
 
     def completion_proc=(val)
@@ -87,10 +89,15 @@ module PryRemote
       self
     end
 
-    # Some versions of Pry expect $stdout or its output objects to respond to
-    # this message.
+    def flush
+      @obj.flush if @obj.respond_to?(:flush)
+    end
+
+    # Whether the underlying stream is a TTY, captured when the proxy is
+    # built — this is answered over DRb and the client's terminal doesn't
+    # change mid-session.
     def tty?
-      false
+      @tty
     end
   end
 
@@ -122,9 +129,18 @@ module PryRemote
     Pry::Editor.new(Pry.new).edit_tempfile_with_content(initial_content, line)
   end
 
+  # Plain-PP print proc, used when the client passes --no-color so result
+  # output doesn't ship ANSI escapes the client can't render.
+  NonColorPrint = proc do |_output, value, pry_instance|
+    pry_instance.pager.open do |pager|
+      pager.print pry_instance.config.output_prefix
+      PP.pp(value, pager, pry_instance.output.width - 1)
+    end
+  end
+
   # A client is used to retrieve information from the client program.
   Client = Struct.new(:input, :output, :thread, :stdout, :stderr,
-                      :editor) do
+                      :editor, :color) do
     # Waits until both an input and output are set
     def wait
       sleep 0.01 until input and output and thread
@@ -178,6 +194,14 @@ module PryRemote
       Pry.config.system, @old_system = PryRemote::System, Pry.config.system
 
       Pry.config.editor, @old_editor = editor_proc, Pry.config.editor
+
+      # The client decides whether its terminal can render ANSI (--no-color
+      # toggles this). When off, also swap the print proc to plain PP so
+      # expression results don't ship ANSI escapes the client can't render.
+      want_color = @client.color.nil? ? true : @client.color
+      Pry.config.color, @old_color = want_color, Pry.config.color
+      @old_print = Pry.config.print
+      Pry.config.print = NonColorPrint unless want_color
     end
 
     # Code that has to be called after setup to return to the initial state
@@ -186,6 +210,8 @@ module PryRemote
       Pry.config.editor = @old_editor
       Pry.config.pager  = @old_pager
       Pry.config.system = @old_system
+      Pry.config.color  = @old_color
+      Pry.config.print  = @old_print
 
       puts "[pry-remote] Remote session terminated"
 
@@ -268,7 +294,9 @@ module PryRemote
         wait: false,
         persist: false,
         capture: true,
-        skip_rc: false
+        skip_rc: false,
+        color: $stdout.tty?,
+        autocomplete: $stdout.tty?
       }
 
       parser = OptionParser.new do |o|
@@ -279,6 +307,8 @@ module PryRemote
         o.on('-w', '--wait', "Wait for the pry server to come up") { options[:wait] = true }
         o.on('-r', '--persist', "Persist the client to wait for the pry server to come up each time") { options[:persist] = true }
         o.on('-c', '--[no-]capture', "Captures $stdout and $stderr from the server") { |v| options[:capture] = v }
+        o.on('--[no-]color', "Enable syntax highlighting (default: on when stdout is a TTY)") { |v| options[:color] = v }
+        o.on('--[no-]autocomplete', "Show completions in a dropdown as you type; each keystroke queries the server, so disable on high-latency connections (default: on when stdout is a TTY)") { |v| options[:autocomplete] = v }
         o.on('-f', '--skip-rc', "Disables loading of .pryrc and its plugins, requires, and command history") { options[:skip_rc] = true }
         o.on('-h', '--help', "Show this help message") do
           puts o
@@ -293,6 +323,8 @@ module PryRemote
       @wait = options[:wait]
       @persist = options[:persist]
       @capture = options[:capture]
+      @color = options[:color]
+      @autocomplete = options[:autocomplete]
 
       if options[:skip_rc]
         Pry.config.should_load_rc = false
@@ -315,9 +347,13 @@ module PryRemote
     attr_reader :wait
     attr_reader :persist
     attr_reader :capture
+    attr_reader :color
+    attr_reader :autocomplete
     alias wait? wait
     alias persist? persist
     alias capture? capture
+    alias color? color
+    alias autocomplete? autocomplete
 
     def run
       while true
@@ -328,14 +364,18 @@ module PryRemote
 
     # Connects to the server
     #
-    # @param [IO] input  Object holding input for pry-remote
+    # @param [IO] input  Object holding input for pry-remote. Reline is used
+    #   by default (rather than Pry.config.input, which prefers Readline when
+    #   available) so that highlighting, autocompletion and history work.
     # @param [IO] output Object pry-debug will send its output to
-    def connect(input = Pry.config.input, output = Pry.config.output)
+    def connect(input = Reline, output = Pry.config.output)
       local_ip = UDPSocket.open {|s| s.connect(@host, 1); s.addr.last}
       DRb.start_service "druby://#{local_ip}:0"
       client = DRbObject.new(nil, uri)
 
       cleanup(client)
+
+      setup_reline if Reline == input
 
       input  = IOUndumpedProxy.new(input)
       output = IOUndumpedProxy.new(output)
@@ -359,10 +399,54 @@ module PryRemote
 
       client.editor = ClientEditor
 
+      begin
+        client.color = color?
+      rescue DRb::DRbRemoteError, NoMethodError
+        # Server runs an older pry-remote whose Client has no color slot;
+        # session still works, results just aren't highlighted server-side.
+        $stderr.puts "[pry-remote] Server uses an older pry-remote without color support"
+      end
+
       client.thread = Thread.current
 
       sleep
       DRb.stop_service
+    end
+
+    # Reline runs locally on the client, while Pry's REPL runs on the server
+    # and only ever sees a DRb proxy as its input — so everything that REPL
+    # would normally configure on Reline has to be wired up here instead.
+    def setup_reline
+      if color?
+        Reline.output_modifier_proc = lambda do |text, _|
+          Pry::SyntaxHighlighter.highlight(text)
+        end
+      end
+
+      # The completion proc itself is installed by the server's Pry REPL and
+      # round-trips over DRb; this only turns on the IRB-style dropdown that
+      # displays the candidates as you type.
+      Reline.autocompletion = autocomplete?
+
+      load_history
+    end
+
+    # Loads the local Pry history file into Reline so that previous sessions
+    # are reachable with up-arrow. The client never writes the file: the
+    # server-side Pry appends each eval'd line to its own history file, which
+    # is the same file whenever client and server share a machine.
+    def load_history
+      return if @history_loaded
+      return unless Pry.config.history_load
+
+      @history_loaded = true
+      history_file = File.expand_path(Pry.config.history_file)
+      return unless File.exist?(history_file)
+
+      File.foreach(history_file) do |line|
+        line = line.chomp
+        Reline::HISTORY << line unless line.empty?
+      end
     end
 
     # Clean up the client
